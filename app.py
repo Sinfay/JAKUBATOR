@@ -35,11 +35,10 @@ for idx, name in enumerate(list(st.session_state.participants.keys())):
     with st.expander(name, expanded=True):
         current = st.session_state.participants.get(name, [])
         cfg = Config(
-            selection_mode="multiple",
-            default_value=current if current else None,
-            placeholder=f"Wybierz daty dla {name}",
-            minimum_today=True
-        )
+    selection_mode="multiple",
+    default_value=current if current else None,
+    placeholder=f"Wybierz daty dla {name}"
+)
         picked = datepicker_component(config=cfg)
         if picked:
             st.write("Wybrane daty:", ", ".join(d.isoformat() for d in picked))
