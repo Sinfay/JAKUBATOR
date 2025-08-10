@@ -2,100 +2,76 @@ import streamlit as st
 from streamlit_nej_datepicker import datepicker_component, Config
 from datetime import datetime, timedelta
 
-st.set_page_config(page_title="JAKUBATOR", page_icon="📅", layout="wide")
-st.title("📅 JAKUBATOR — wybierz daty na Jakubalia")
-st.write("Dodaj osoby po lewej, każda wybiera daty. Kliknij **Znajdź wspólne daty**, aby poznać zakresy dostępne dla wszystkich.")
+def parse_dates(dates_str_list):
+    # konwersja listy stringów 'YYYY-MM-DD' na listę datetime.date
+    return [datetime.strptime(d, "%Y-%m-%d").date() for d in dates_str_list]
 
-if "participants" not in st.session_state:
+def intersect_date_ranges(lists_of_dates):
+    if not lists_of_dates:
+        return []
+    # dla uproszczenia: bierzemy minimalną i maksymalną datę każdego użytkownika jako zakres,
+    # następnie znajdujemy zakres wspólny (przecięcie) wszystkich zakresów
+    
+    min_dates = [min(dates) for dates in lists_of_dates if dates]
+    max_dates = [max(dates) for dates in lists_of_dates if dates]
+
+    if not min_dates or not max_dates:
+        return []
+
+    start = max(min_dates)
+    end = min(max_dates)
+    if start > end:
+        return []  # brak wspólnych dat
+
+    # zwracamy wszystkie dni z zakresu od start do end
+    delta = (end - start).days
+    return [start + timedelta(days=i) for i in range(delta + 1)]
+
+# Inicjalizacja stanu sesji
+if 'participants' not in st.session_state:
     st.session_state.participants = {}
-    st.session_state.next_id = 1
 
-# --- Sidebar
-with st.sidebar:
-    st.header("Dodaj osobę")
-    new_name = st.text_input("Imię / nick (opcjonalnie)")
-    if st.button("Dodaj osobę"):
-        name = new_name.strip() or f"Osoba {st.session_state.next_id}"
-        if name in st.session_state.participants:
-            st.warning("Taka osoba już istnieje.")
+st.title("Jakubator - Wybór dat na Jakubalia")
+
+# Dodawanie nowego użytkownika
+with st.form("add_user_form"):
+    new_user = st.text_input("Dodaj nazwę użytkownika:")
+    submitted = st.form_submit_button("Dodaj użytkownika")
+    if submitted and new_user:
+        if new_user in st.session_state.participants:
+            st.warning(f"Użytkownik {new_user} już istnieje.")
         else:
-            st.session_state.participants[name] = []
-            st.session_state.next_id += 1
-            st.success(f"Dodano: {name}")
-    st.markdown("---")
-    if st.button("Usuń wszystkie osoby"):
-        st.session_state.participants = {}
-        st.session_state.next_id = 1
-        st.experimental_rerun()
+            st.session_state.participants[new_user] = []
+            st.success(f"Dodano użytkownika {new_user}.")
 
-# --- Główna część
-for idx, name in enumerate(list(st.session_state.participants.keys())):
-    with st.expander(name, expanded=True):
-        current = st.session_state.participants.get(name, [])
-        default_val = [d.isoformat() for d in current] if current else None
+# Edycja dat dla każdego użytkownika
+for name in list(st.session_state.participants.keys()):
+    with st.expander(f"Daty dla: {name}", expanded=True):
+        current_dates = st.session_state.participants.get(name, [])
+        # konwersja datetime.date do stringów, jeśli są daty
+        default_val = [d.strftime("%Y-%m-%d") for d in current_dates] if current_dates else []
 
         cfg = Config(
             selection_mode="multiple",
-            default_value=default_val
+            default_value=default_val,
+            placeholder=f"Wybierz daty dla {name}"
         )
+        # klucz musi być unikalny
+        picked_str = datepicker_component(config=cfg, key=f"calendar_{name}")
 
-        picked = datepicker_component(config=cfg, key=f"calendar_{name}")
+        if picked_str is not None:
+            picked_dates = parse_dates(picked_str)
+            st.session_state.participants[name] = picked_dates
 
-        if picked:
-            st.write("Wybrane daty:", ", ".join(d.isoformat() for d in picked))
-        else:
-            st.write("Wybrane daty: brak")
-
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Zapisz daty", key=f"save_{idx}"):
-            st.session_state.participants[name] = picked or []
-            st.success("Zapisano.")
-        if c2.button("Wyczyść daty", key=f"clear_{idx}"):
-            st.session_state.participants[name] = []
-            st.success("Wyczyszczono.")
-        if c3.button("Usuń osobę", key=f"del_{idx}"):
-            del st.session_state.participants[name]
-            st.experimental_rerun()
+# Wyświetlenie wspólnego zakresu dat (przecięcia)
+all_dates_lists = list(st.session_state.participants.values())
+common_dates = intersect_date_ranges(all_dates_lists)
 
 st.markdown("---")
+st.header("Wspólne dostępne daty dla wszystkich użytkowników:")
 
-def merge_dates_to_ranges(dates):
-    """Przyjmuje posortowaną listę dat datetime.date i zwraca listę (start, end) przedziałów."""
-    if not dates:
-        return []
-    ranges = []
-    start = prev = dates[0]
-    for current in dates[1:]:
-        if (current - prev).days == 1:
-            prev = current
-        else:
-            ranges.append((start, prev))
-            start = prev = current
-    ranges.append((start, prev))
-    return ranges
-
-if st.button("🔎 Znajdź wspólne daty"):
-    if not st.session_state.participants:
-        st.warning("Dodaj przynajmniej jedną osobę.")
-    else:
-        # Sprawdź, czy każdy ma zaznaczone daty
-        if any(not dates for dates in st.session_state.participants.values()):
-            st.warning("Każda osoba musi wybrać przynajmniej jedną datę.")
-        else:
-            # Przecięcie zbiorów dat
-            sets = [set(st.session_state.participants[name]) for name in st.session_state.participants]
-            common_dates = set.intersection(*sets) if sets else set()
-
-            if not common_dates:
-                st.error("Brak wspólnych dat — spróbuj wybrać inne terminy.")
-            else:
-                # Sortujemy wspólne daty
-                common_sorted = sorted(common_dates)
-                # Zamieniamy na przedziały
-                ranges = merge_dates_to_ranges(common_sorted)
-                st.success("Daty wspólne wszystkim uczestnikom (zakresy):")
-                for start, end in ranges:
-                    if start == end:
-                        st.write(f"- {start.isoformat()}")
-                    else:
-                        st.write(f"- {start.isoformat()} – {end.isoformat()}")
+if common_dates:
+    # wypisz zakres dat
+    st.write(f"Od {common_dates[0].strftime('%Y-%m-%d')} do {common_dates[-1].strftime('%Y-%m-%d')}")
+else:
+    st.write("Brak wspólnych dostępnych dat.")
