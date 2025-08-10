@@ -1,18 +1,16 @@
 import streamlit as st
 from streamlit_nej_datepicker import datepicker_component, Config
-from collections import Counter
-import csv, io
+from datetime import datetime, timedelta
 
 st.set_page_config(page_title="JAKUBATOR", page_icon="📅", layout="wide")
 st.title("📅 JAKUBATOR — wybierz daty na Jakubalia")
-st.write("Dodaj osoby w pasku bocznym, każda osoba wybiera dowolną liczbę dat w kalendarzu. Potem kliknij **Znajdź wspólne daty**.")
+st.write("Dodaj osoby po lewej, każda wybiera daty. Kliknij **Znajdź wspólne daty**, aby poznać zakresy dostępne dla wszystkich.")
 
-# inicjalizacja session_state
 if "participants" not in st.session_state:
-    st.session_state.participants = {}  # {name: [date,...]}
+    st.session_state.participants = {}
     st.session_state.next_id = 1
 
-# --- sidebar: dodawanie osób
+# --- Sidebar
 with st.sidebar:
     st.header("Dodaj osobę")
     new_name = st.text_input("Imię / nick (opcjonalnie)")
@@ -30,14 +28,19 @@ with st.sidebar:
         st.session_state.next_id = 1
         st.experimental_rerun()
 
-# --- główna część: listujemy osoby i pokazujemy kalendarz dla każdej
+# --- Główna część
 for idx, name in enumerate(list(st.session_state.participants.keys())):
     with st.expander(name, expanded=True):
         current = st.session_state.participants.get(name, [])
+        default_val = [d.isoformat() for d in current] if current else None
+
         cfg = Config(
-    selection_mode="multiple"
-)
-        picked = datepicker_component(config=cfg)
+            selection_mode="multiple",
+            default_value=default_val
+        )
+
+        picked = datepicker_component(config=cfg, key=f"calendar_{name}")
+
         if picked:
             st.write("Wybrane daty:", ", ".join(d.isoformat() for d in picked))
         else:
@@ -55,37 +58,44 @@ for idx, name in enumerate(list(st.session_state.participants.keys())):
             st.experimental_rerun()
 
 st.markdown("---")
-if st.button("🔎 Znajdź wspólne daty"):
-    lists = [set(v) for v in st.session_state.participants.values() if v]
-    if not lists:
-        st.warning("Brak dat do porównania — dodaj osoby i wybierz daty.")
-    else:
-        common = set.intersection(*lists) if lists else set()
-        if common:
-            common_sorted = sorted(common)
-            st.success("Daty pasujące wszystkim:")
-            st.write(", ".join(d.isoformat() for d in common_sorted))
-            # CSV do pobrania
-            buf = io.StringIO()
-            w = csv.writer(buf)
-            w.writerow(["date", "count"])
-            for d in common_sorted:
-                w.writerow([d.isoformat(), sum(1 for s in lists if d in s)])
-            st.download_button("Pobierz wspólne daty (CSV)", data=buf.getvalue(),
-                               file_name="jakubator_common_dates.csv", mime="text/csv")
+
+def merge_dates_to_ranges(dates):
+    """Przyjmuje posortowaną listę dat datetime.date i zwraca listę (start, end) przedziałów."""
+    if not dates:
+        return []
+    ranges = []
+    start = prev = dates[0]
+    for current in dates[1:]:
+        if (current - prev).days == 1:
+            prev = current
         else:
-            st.error("Brak dat pasujących wszystkim. Proponowane kompromisy (najpopularniejsze daty):")
-            all_dates = [d for v in st.session_state.participants.values() for d in v]
-            counts = Counter(all_dates)
-            most = counts.most_common(10)
-            if not most:
-                st.info("Nikt nie wybrał żadnej daty.")
+            ranges.append((start, prev))
+            start = prev = current
+    ranges.append((start, prev))
+    return ranges
+
+if st.button("🔎 Znajdź wspólne daty"):
+    if not st.session_state.participants:
+        st.warning("Dodaj przynajmniej jedną osobę.")
+    else:
+        # Sprawdź, czy każdy ma zaznaczone daty
+        if any(not dates for dates in st.session_state.participants.values()):
+            st.warning("Każda osoba musi wybrać przynajmniej jedną datę.")
+        else:
+            # Przecięcie zbiorów dat
+            sets = [set(st.session_state.participants[name]) for name in st.session_state.participants]
+            common_dates = set.intersection(*sets) if sets else set()
+
+            if not common_dates:
+                st.error("Brak wspólnych dat — spróbuj wybrać inne terminy.")
             else:
-                for d, cnt in most:
-                    st.write(f"{d.isoformat()} — {cnt} osób")
-                # CSV z propozycjami
-                buf = io.StringIO()
-                w = csv.writer(buf)
-                w.writerow(["date", "count"])
-                for d, cnt in most:
-                    w.write
+                # Sortujemy wspólne daty
+                common_sorted = sorted(common_dates)
+                # Zamieniamy na przedziały
+                ranges = merge_dates_to_ranges(common_sorted)
+                st.success("Daty wspólne wszystkim uczestnikom (zakresy):")
+                for start, end in ranges:
+                    if start == end:
+                        st.write(f"- {start.isoformat()}")
+                    else:
+                        st.write(f"- {start.isoformat()} – {end.isoformat()}")
