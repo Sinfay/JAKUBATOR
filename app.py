@@ -1,8 +1,7 @@
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from streamlit_nej_datepicker import datepicker_component, Config
 
-# Funkcja do bezpiecznego parsowania dat z różnych formatów
 def parse_dates(dates_input):
     if dates_input is None:
         return []
@@ -12,12 +11,10 @@ def parse_dates(dates_input):
         return [datetime.strptime(d, "%Y-%m-%d").date() for d in dates_input]
     return []
 
-# Funkcja do znalezienia wspólnego zakresu dat dla wszystkich użytkowników
 def find_common_date_range(date_lists):
     if not date_lists:
         return None, None
 
-    # Znajdujemy przecięcie zakresów
     max_start = max(dates[0] for dates in date_lists if dates)
     min_end = min(dates[-1] for dates in date_lists if dates)
 
@@ -28,11 +25,9 @@ def find_common_date_range(date_lists):
 
 st.title("Jakubator - wybierz najlepsze daty na Jakubalia")
 
-# Przechowujemy dane użytkowników w stanie sesji
 if "users" not in st.session_state:
     st.session_state.users = {}
 
-# Dodawanie nowego użytkownika
 with st.form("add_user_form"):
     new_user = st.text_input("Nazwa użytkownika")
     submitted = st.form_submit_button("Dodaj użytkownika")
@@ -47,16 +42,14 @@ with st.form("add_user_form"):
 
 st.write("---")
 
-# Wybór użytkownika do dodania dat
 user_to_edit = st.selectbox("Wybierz użytkownika do zaznaczenia dat", options=list(st.session_state.users.keys()))
 
 if user_to_edit:
     current_dates = st.session_state.users[user_to_edit]
 
-    # Przygotowanie domyślnej wartości dla kalendarza w formacie stringów
-    default_val = [d.strftime("%Y-%m-%d") for d in current_dates] if current_dates else None
+    # UWAGA: default_value MUSI byc listą dat (nie stringów)
+    default_val = current_dates if current_dates else None
 
-    # Konfiguracja datepicker (unikalny klucz na użytkownika, by uniknąć błędów duplikacji)
     cfg = Config(
         selection_mode="multiple",
         default_value=default_val,
@@ -74,11 +67,7 @@ if user_to_edit:
 
 st.write("---")
 
-# Pokazujemy wynik - wspólne daty wszystkich użytkowników
-all_date_ranges = []
-for dates in st.session_state.users.values():
-    if dates:
-        all_date_ranges.append(dates)
+all_date_ranges = [dates for dates in st.session_state.users.values() if dates]
 
 if all_date_ranges:
     start, end = find_common_date_range(all_date_ranges)
@@ -88,4 +77,3 @@ if all_date_ranges:
         st.error("Brak wspólnego zakresu dat dla wszystkich użytkowników.")
 else:
     st.info("Dodaj daty dla użytkowników, aby zobaczyć wspólny zakres.")
-
