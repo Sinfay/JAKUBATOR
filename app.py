@@ -1,77 +1,91 @@
 import streamlit as st
-from streamlit_nej_datepicker import datepicker_component, Config
 from datetime import datetime, timedelta
+from streamlit_nej_datepicker import datepicker_component, Config
 
-def parse_dates(dates_str_list):
-    # konwersja listy stringów 'YYYY-MM-DD' na listę datetime.date
-    return [datetime.strptime(d, "%Y-%m-%d").date() for d in dates_str_list]
-
-def intersect_date_ranges(lists_of_dates):
-    if not lists_of_dates:
+# Funkcja do bezpiecznego parsowania dat z różnych formatów
+def parse_dates(dates_input):
+    if dates_input is None:
         return []
-    # dla uproszczenia: bierzemy minimalną i maksymalną datę każdego użytkownika jako zakres,
-    # następnie znajdujemy zakres wspólny (przecięcie) wszystkich zakresów
-    
-    min_dates = [min(dates) for dates in lists_of_dates if dates]
-    max_dates = [max(dates) for dates in lists_of_dates if dates]
+    if isinstance(dates_input, str):
+        return [datetime.strptime(dates_input, "%Y-%m-%d").date()]
+    if isinstance(dates_input, list):
+        return [datetime.strptime(d, "%Y-%m-%d").date() for d in dates_input]
+    return []
 
-    if not min_dates or not max_dates:
-        return []
+# Funkcja do znalezienia wspólnego zakresu dat dla wszystkich użytkowników
+def find_common_date_range(date_lists):
+    if not date_lists:
+        return None, None
 
-    start = max(min_dates)
-    end = min(max_dates)
-    if start > end:
-        return []  # brak wspólnych dat
+    # Znajdujemy przecięcie zakresów
+    max_start = max(dates[0] for dates in date_lists if dates)
+    min_end = min(dates[-1] for dates in date_lists if dates)
 
-    # zwracamy wszystkie dni z zakresu od start do end
-    delta = (end - start).days
-    return [start + timedelta(days=i) for i in range(delta + 1)]
+    if max_start <= min_end:
+        return max_start, min_end
+    else:
+        return None, None
 
-# Inicjalizacja stanu sesji
-if 'participants' not in st.session_state:
-    st.session_state.participants = {}
+st.title("Jakubator - wybierz najlepsze daty na Jakubalia")
 
-st.title("Jakubator - Wybór dat na Jakubalia")
+# Przechowujemy dane użytkowników w stanie sesji
+if "users" not in st.session_state:
+    st.session_state.users = {}
 
 # Dodawanie nowego użytkownika
 with st.form("add_user_form"):
-    new_user = st.text_input("Dodaj nazwę użytkownika:")
+    new_user = st.text_input("Nazwa użytkownika")
     submitted = st.form_submit_button("Dodaj użytkownika")
-    if submitted and new_user:
-        if new_user in st.session_state.participants:
-            st.warning(f"Użytkownik {new_user} już istnieje.")
+    if submitted:
+        if new_user.strip() == "":
+            st.error("Podaj nazwę użytkownika")
+        elif new_user in st.session_state.users:
+            st.error("Taki użytkownik już istnieje")
         else:
-            st.session_state.participants[new_user] = []
-            st.success(f"Dodano użytkownika {new_user}.")
+            st.session_state.users[new_user] = []
+            st.success(f"Dodano użytkownika {new_user}")
 
-# Edycja dat dla każdego użytkownika
-for name in list(st.session_state.participants.keys()):
-    with st.expander(f"Daty dla: {name}", expanded=True):
-        current_dates = st.session_state.participants.get(name, [])
-        # konwersja datetime.date do stringów, jeśli są daty
-        default_val = [d.strftime("%Y-%m-%d") for d in current_dates] if current_dates else []
+st.write("---")
 
-        cfg = Config(
-            selection_mode="multiple",
-            default_value=default_val,
-            placeholder=f"Wybierz daty dla {name}"
-        )
-        # klucz musi być unikalny
-        picked_str = datepicker_component(config=cfg, key=f"calendar_{name}")
+# Wybór użytkownika do dodania dat
+user_to_edit = st.selectbox("Wybierz użytkownika do zaznaczenia dat", options=list(st.session_state.users.keys()))
 
-        if picked_str is not None:
-            picked_dates = parse_dates(picked_str)
-            st.session_state.participants[name] = picked_dates
+if user_to_edit:
+    current_dates = st.session_state.users[user_to_edit]
 
-# Wyświetlenie wspólnego zakresu dat (przecięcia)
-all_dates_lists = list(st.session_state.participants.values())
-common_dates = intersect_date_ranges(all_dates_lists)
+    # Przygotowanie domyślnej wartości dla kalendarza w formacie stringów
+    default_val = [d.strftime("%Y-%m-%d") for d in current_dates] if current_dates else None
 
-st.markdown("---")
-st.header("Wspólne dostępne daty dla wszystkich użytkowników:")
+    # Konfiguracja datepicker (unikalny klucz na użytkownika, by uniknąć błędów duplikacji)
+    cfg = Config(
+        selection_mode="multiple",
+        default_value=default_val,
+        placeholder=f"Wybierz daty dla {user_to_edit}"
+    )
 
-if common_dates:
-    # wypisz zakres dat
-    st.write(f"Od {common_dates[0].strftime('%Y-%m-%d')} do {common_dates[-1].strftime('%Y-%m-%d')}")
+    picked_str = datepicker_component(key=f"datepicker_{user_to_edit}", config=cfg)
+    picked_dates = parse_dates(picked_str)
+
+    if picked_dates:
+        st.session_state.users[user_to_edit] = sorted(picked_dates)
+        st.write(f"Wybrane daty dla {user_to_edit}: ", st.session_state.users[user_to_edit])
+    else:
+        st.write(f"Brak zaznaczonych dat dla {user_to_edit}")
+
+st.write("---")
+
+# Pokazujemy wynik - wspólne daty wszystkich użytkowników
+all_date_ranges = []
+for dates in st.session_state.users.values():
+    if dates:
+        all_date_ranges.append(dates)
+
+if all_date_ranges:
+    start, end = find_common_date_range(all_date_ranges)
+    if start and end:
+        st.success(f"Wspólny zakres dat dla wszystkich użytkowników: od {start.strftime('%Y-%m-%d')} do {end.strftime('%Y-%m-%d')}")
+    else:
+        st.error("Brak wspólnego zakresu dat dla wszystkich użytkowników.")
 else:
-    st.write("Brak wspólnych dostępnych dat.")
+    st.info("Dodaj daty dla użytkowników, aby zobaczyć wspólny zakres.")
+
